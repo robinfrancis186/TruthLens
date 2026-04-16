@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/robinfrancis186/truthlens/contracts/analysis-response.schema.json",
+  "title": "TruthLensAnalysisResponse",
+  "type": "object",
+  "required": [
+    "request_id",
+    "verdict",
+    "confidence",
+    "confidence_range",
+    "modality",
+    "detected_sources",
+    "watermark_signals",
+    "layer_scores",
+    "explanation",
+    "processing_time_ms"
+  ],
+  "properties": {
+    "request_id": { "type": "string", "format": "uuid" },
+    "verdict": {
+      "type": "string",
+      "enum": ["AI_GENERATED", "LIKELY_AI", "UNCERTAIN", "LIKELY_HUMAN", "HUMAN"]
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "confidence_range": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "modality": {
+      "type": "string",
+      "enum": ["IMAGE", "VIDEO", "TEXT"]
+    },
+    "detected_sources": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "watermark_signals": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "layer_scores": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+    },
+    "explanation": { "type": "string" },
+    "processing_time_ms": { "type": "integer", "minimum": 0 },
+    "layer_breakdown": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "score", "explanation"],
+        "properties": {
+          "name": { "type": "string" },
+          "score": { "type": "number", "minimum": 0, "maximum": 1 },
+          "explanation": { "type": "string" }
+        }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "disclaimer": { "type": "string" }
+  }
+}
+

@@ -1,0 +1,25 @@
+{
+  "request_id": "2f6e26f5-4f25-4b57-9b60-6d93c64d9801",
+  "verdict": "LIKELY_AI",
+  "confidence": 0.72,
+  "confidence_range": [0.63, 0.81],
+  "modality": "TEXT",
+  "detected_sources": ["General LLM-style prose"],
+  "watermark_signals": {
+    "synthid_text": {
+      "detected": false,
+      "score": 0.08,
+      "status": "demo_not_integrated"
+    }
+  },
+  "layer_scores": {
+    "watermark": 0.08,
+    "linguistic": 0.78,
+    "neural_classifier": 0.74,
+    "provenance": 0.16
+  },
+  "explanation": "Uniform sentence rhythm, low burstiness, and repeated assistant-style transitions are consistent with AI-assisted writing. Watermark detection is not integrated in this MVP.",
+  "processing_time_ms": 21,
+  "disclaimer": "TruthLens MVP provides probabilistic demo signals, not legal or forensic proof."
+}
+

@@ -1,0 +1,59 @@
+import type { AnalysisResponse, Modality, StatusResponse } from "./types";
+
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+
+async function parseApiError(response: Response): Promise<string> {
+  try {
+    const body = (await response.json()) as { detail?: unknown };
+    if (typeof body.detail === "string") {
+      return body.detail;
+    }
+    if (Array.isArray(body.detail)) {
+      return body.detail.map((entry) => ("msg" in entry ? String(entry.msg) : "Validation error")).join(" ");
+    }
+  } catch {
+    return `Request failed with status ${response.status}.`;
+  }
+  return `Request failed with status ${response.status}.`;
+}
+
+export async function analyzeContent(input: {
+  modality: Modality;
+  text?: string;
+  file?: File | null;
+}): Promise<AnalysisResponse> {
+  const formData = new FormData();
+  formData.append("content_type", input.modality);
+  formData.append("detailed_report", "true");
+  if (input.modality === "text" && input.text) {
+    formData.append("text", input.text);
+  }
+  if (input.file) {
+    formData.append("file", input.file);
+  }
+
+  const response = await fetch(`${API_BASE_URL}/v1/analyze`, {
+    method: "POST",
+    body: formData
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  return (await response.json()) as AnalysisResponse;
+}
+
+export async function getResult(requestId: string): Promise<AnalysisResponse> {
+  const response = await fetch(`${API_BASE_URL}/v1/status/${requestId}`, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(await parseApiError(response));
+  }
+
+  const body = (await response.json()) as StatusResponse;
+  return body.result;
+}
+
