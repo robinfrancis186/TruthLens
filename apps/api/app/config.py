@@ -7,6 +7,7 @@ class Settings(BaseSettings):
     result_ttl_seconds: int = 60 * 60 * 24
     max_upload_mb: int = 200
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origin_regex: str | None = r"^http://(localhost|127\.0\.0\.1):[0-9]+$"
 
     model_config = SettingsConfigDict(
         env_file=".env",

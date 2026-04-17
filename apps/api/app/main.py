@@ -30,6 +30,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list or ["http://localhost:3000"],
+    allow_origin_regex=settings.cors_origin_regex or None,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -132,4 +133,3 @@ def status(request_id: str) -> dict[str, object]:
     if result is None:
         raise HTTPException(status_code=404, detail="Result not found or expired.")
     return {"request_id": request_id, "status": "completed", "result": result}
-

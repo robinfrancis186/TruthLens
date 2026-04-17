@@ -71,11 +71,11 @@ class ImageDemoDetector:
         has_c2pa = b"c2pa" in data.lower()[:262144] or b"content credentials" in data.lower()[:262144]
         jpeg_blocks = data.count(b"\xff\xd8") + data.count(b"\xff\xdb") + data.count(b"\xff\xc4")
 
-        neural = 0.34 + stable_unit(data, "image-neural") * 0.45 + filename_ai_hint * 0.18
-        frequency = 0.22 + abs(entropy - 0.72) * 0.9 + stable_unit(data, "image-frequency") * 0.18
-        forensic = 0.18 + (0.16 if not has_exif else -0.08) + size_factor * 0.08 + stable_unit(data, "image-forensic") * 0.34
-        provenance = 0.08 + filename_ai_hint * 0.48 + (0.08 if has_c2pa else 0.0)
-        watermark = 0.1 + (0.36 if b"synthid" in data.lower()[:262144] else 0.0) + filename_ai_hint * 0.08
+        neural = 0.34 + stable_unit(data, "image-neural") * 0.45 + filename_ai_hint * 0.33
+        frequency = 0.22 + abs(entropy - 0.72) * 0.9 + stable_unit(data, "image-frequency") * 0.18 + filename_ai_hint * 0.08
+        forensic = 0.18 + (0.16 if not has_exif else -0.08) + size_factor * 0.08 + stable_unit(data, "image-forensic") * 0.34 + filename_ai_hint * 0.08
+        provenance = 0.08 + filename_ai_hint * 0.78 + (0.08 if has_c2pa else 0.0)
+        watermark = 0.1 + (0.36 if b"synthid" in data.lower()[:262144] else 0.0) + filename_ai_hint * 0.14
 
         layer_scores = {
             "watermark": round_score(watermark),
@@ -95,11 +95,14 @@ class ImageDemoDetector:
             for x in range(8)
         ]
 
-        detected_sources = likely_sources(
-            ("Midjourney-style image", layer_scores["neural_classifier"]),
-            ("Stable Diffusion / Flux-style image", layer_scores["frequency_domain"]),
-            ("C2PA-attributed AI image", 0.72 if has_c2pa and filename_ai_hint else 0.0),
-        )
+        if filename_ai_hint or has_c2pa:
+            detected_sources = likely_sources(
+                ("Midjourney-style image", layer_scores["neural_classifier"]),
+                ("Stable Diffusion / Flux-style image", layer_scores["frequency_domain"]),
+                ("C2PA-attributed AI image", 0.72 if has_c2pa and filename_ai_hint else 0.0),
+            )
+        else:
+            detected_sources = ["No specific generator identified"]
 
         explanation_parts = [
             "Image analysis used deterministic MVP heuristics for metadata, byte distribution, filename hints, and pseudo-neural scoring.",
@@ -225,13 +228,20 @@ class TextHeuristicDetector:
         phrase_density = phrase_hits / max(len(sentences), 1)
         punctuation_uniformity = 1.0 - clamp(len(set(sentence[-1] for sentence in sentences if sentence)) / 4)
 
-        low_burstiness_signal = clamp(1.0 - burstiness)
+        burstiness_reliability = clamp((len(sentences) - 2) / 3)
+        low_burstiness_signal = clamp(1.0 - burstiness) * burstiness_reliability
         polished_length_signal = clamp((avg_sentence - 12) / 18)
         lexical_signal = clamp((0.62 - unique_ratio) * 2.2)
         phrase_signal = clamp(phrase_density / 0.6)
+        first_person_count = sum(1 for word in words if word in {"i", "me", "my", "mine", "we", "our", "ours"})
+        human_context_signal = clamp((first_person_count / max(word_count, 1)) * 12 + clamp(unique_ratio - 0.72) * 1.5)
 
         linguistic = 0.2 + low_burstiness_signal * 0.22 + polished_length_signal * 0.18 + phrase_signal * 0.42
-        neural = 0.28 + stable_unit(normalized, "text-neural") * 0.18 + linguistic * 0.55
+        if phrase_hits == 0:
+            linguistic -= human_context_signal * 0.2
+        neural = 0.26 + stable_unit(normalized, "text-neural") * 0.12 + linguistic * 0.58 + phrase_signal * 0.08
+        if phrase_hits == 0:
+            neural -= human_context_signal * 0.14
         provenance = 0.08 + (0.12 if filename and Path(filename).suffix.lower() in {".docx", ".pdf"} else 0.0)
         watermark = 0.08 + (0.32 if "synthid" in normalized.lower() else 0.0)
 
@@ -286,6 +296,7 @@ class TextHeuristicDetector:
                     "burstiness": round(burstiness, 3),
                     "phrase_hits": phrase_hits,
                     "punctuation_uniformity": round(punctuation_uniformity, 3),
+                    "human_context": round(human_context_signal, 3),
                 },
             },
             explanation_parts=explanation_parts,

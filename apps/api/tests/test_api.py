@@ -20,6 +20,19 @@ def test_models() -> None:
     assert {entry["modality"] for entry in body["modalities"]} == {"IMAGE", "VIDEO", "TEXT"}
 
 
+def test_loopback_cors_allows_alternate_web_ports() -> None:
+    origin = "http://127.0.0.1:3001"
+    response = client.options(
+        "/v1/analyze",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == origin
+
+
 def test_text_analyze_shape() -> None:
     response = client.post(
         "/v1/analyze",
@@ -89,6 +102,21 @@ def test_same_text_stable_scores() -> None:
     assert first["layer_scores"] == second["layer_scores"]
 
 
+def test_human_context_lowers_short_text_score() -> None:
+    ai_text = (
+        "Furthermore, it is important to note that transparent verification systems play a crucial role. "
+        "Moreover, these comprehensive insights provide seamless operational clarity."
+    )
+    human_text = (
+        "I took the early train to Kochi yesterday and wrote these notes near the platform tea stall. "
+        "The first draft was messy, so I crossed out two paragraphs and kept what I saw."
+    )
+    ai_result = client.post("/v1/analyze", data={"content_type": "text", "text": ai_text}).json()
+    human_result = client.post("/v1/analyze", data={"content_type": "text", "text": human_text}).json()
+    assert ai_result["confidence"] > human_result["confidence"]
+    assert human_result["verdict"] in {"HUMAN", "LIKELY_HUMAN"}
+
+
 def test_unsupported_image_type_rejected() -> None:
     response = client.post(
         "/v1/analyze",
@@ -96,3 +124,13 @@ def test_unsupported_image_type_rejected() -> None:
         files={"file": ("sample.gif", b"GIF89a", "image/gif")},
     )
     assert response.status_code == 415
+
+
+def test_image_sources_require_ai_provenance_hint() -> None:
+    response = client.post(
+        "/v1/analyze",
+        data={"content_type": "image"},
+        files={"file": ("camera-sample.jpg", b"\xff\xd8\xff\xdbExif camera bytes", "image/jpeg")},
+    )
+    assert response.status_code == 200
+    assert response.json()["detected_sources"] == ["No specific generator identified"]

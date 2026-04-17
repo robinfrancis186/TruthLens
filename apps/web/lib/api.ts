@@ -1,6 +1,6 @@
 import type { AnalysisResponse, Modality, StatusResponse } from "./types";
 
-export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "";
 
 async function parseApiError(response: Response): Promise<string> {
   try {
@@ -56,4 +56,3 @@ export async function getResult(requestId: string): Promise<AnalysisResponse> {
   const body = (await response.json()) as StatusResponse;
   return body.result;
 }
-

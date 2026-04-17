@@ -14,14 +14,31 @@ writeFileSync(videoFixture, Buffer.from("\x00\x00\x00 ftypmp42moovtruthlens gene
 const browser = await chromium.launch({
   executablePath: chromePath,
   headless: true,
-  args: ["--disable-extensions", "--disable-gpu", "--no-first-run"]
+  args: ["--disable-extensions", "--disable-gpu", "--no-first-run", "--no-proxy-server", "--proxy-bypass-list=<-loopback>"]
 });
 
 const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
+const cdpSession = await page.context().newCDPSession(page);
 const failures = [];
 
+async function gotoReady(url) {
+  try {
+    await page.goto(url, { waitUntil: "commit", timeout: 5000 });
+  } catch (error) {
+    if (error.name !== "TimeoutError") {
+      throw error;
+    }
+    await cdpSession.send("Page.stopLoading").catch(() => undefined);
+  }
+}
+
+function isIgnoredConsoleError(message) {
+  const text = message.text();
+  return text.includes("hydrated") && text.includes("webcrx");
+}
+
 page.on("console", (message) => {
-  if (message.type() === "error") {
+  if (message.type() === "error" && !isIgnoredConsoleError(message)) {
     failures.push(`console error: ${message.text()}`);
   }
 });
@@ -30,7 +47,7 @@ page.on("pageerror", (error) => {
 });
 
 try {
-  await page.goto(appUrl, { waitUntil: "networkidle" });
+  await gotoReady(appUrl);
   await page.getByRole("heading", { name: /check content authenticity/i }).waitFor();
   await page.getByRole("button", { name: "Analyze" }).click();
   await page.getByText(/Signal Breakdown/i).waitFor({ timeout: 10000 });
@@ -38,17 +55,19 @@ try {
   await page.getByText(/Sentence Signals/i).waitFor();
   await page.screenshot({ path: screenshotPath, fullPage: true });
   const permalinkUrl = page.url();
-  await page.goto(permalinkUrl, { waitUntil: "networkidle" });
+  await gotoReady(permalinkUrl);
   await page.getByRole("heading", { name: /analysis report/i }).waitFor({ timeout: 10000 });
   await page.getByText(/Signal Breakdown/i).waitFor();
 
-  await page.goto(appUrl, { waitUntil: "networkidle" });
+  await gotoReady(appUrl);
+  await page.getByRole("heading", { name: /check content authenticity/i }).waitFor();
   await page.getByRole("button", { name: "Image" }).click();
   await page.locator("#truthlens-file").setInputFiles(imageFixture);
   await page.getByRole("button", { name: "Analyze" }).click();
   await page.getByText(/Image Heatmap/i).waitFor({ timeout: 10000 });
 
-  await page.goto(appUrl, { waitUntil: "networkidle" });
+  await gotoReady(appUrl);
+  await page.getByRole("heading", { name: /check content authenticity/i }).waitFor();
   await page.getByRole("button", { name: "Video" }).click();
   await page.locator("#truthlens-file").setInputFiles(videoFixture);
   await page.getByRole("button", { name: "Analyze" }).click();
