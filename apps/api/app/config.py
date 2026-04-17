@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     hf_token: str | None = None
     hf_text_model: str = "desklib/ai-text-detector-v1.01"
     hf_image_model: str = "haywoodsloan/ai-image-detector-dev-deploy"
-    hf_inference_endpoint_base: str = "https://api-inference.huggingface.co/models"
+    hf_inference_endpoint_base: str = "https://router.huggingface.co/hf-inference/models"
 
     model_config = SettingsConfigDict(
         env_file=".env",

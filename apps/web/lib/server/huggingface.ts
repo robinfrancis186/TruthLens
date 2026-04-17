@@ -3,7 +3,7 @@ import type { DetectorOutput } from "./detectors";
 
 const defaultTextModel = "desklib/ai-text-detector-v1.01";
 const defaultImageModel = "haywoodsloan/ai-image-detector-dev-deploy";
-const defaultEndpointBase = "https://api-inference.huggingface.co/models";
+const defaultEndpointBase = "https://router.huggingface.co/hf-inference/models";
 const timeoutMs = 8000;
 
 interface HfClassification {
