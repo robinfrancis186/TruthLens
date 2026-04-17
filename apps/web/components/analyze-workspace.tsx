@@ -100,7 +100,7 @@ export function AnalyzeWorkspace() {
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-[430px_1fr]">
+      <div className="grid min-w-0 gap-6 lg:grid-cols-[430px_minmax(0,1fr)]">
         <form onSubmit={onSubmit} className="surface h-fit p-5 lg:sticky lg:top-6">
           <div className="mb-5">
             <p className="text-xs font-black uppercase tracking-wide text-cyanline">Analyzer</p>
@@ -178,7 +178,7 @@ export function AnalyzeWorkspace() {
           </div>
         </form>
 
-        <section>
+        <section className="min-w-0">
           {loading ? (
             <div className="surface p-8">
               <p className="text-sm font-black uppercase text-cyanline">Layer Analysis</p>

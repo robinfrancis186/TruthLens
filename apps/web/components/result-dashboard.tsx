@@ -23,7 +23,7 @@ function scoreTone(score: number) {
 function SentenceHighlights({ sentences }: { sentences: SentenceArtifact[] }) {
   if (!sentences.length) return null;
   return (
-    <section className="surface p-5">
+    <section className="surface min-w-0 p-5">
       <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <p className="text-xs font-black uppercase tracking-wide text-cyanline">Text artifact</p>
@@ -31,15 +31,15 @@ function SentenceHighlights({ sentences }: { sentences: SentenceArtifact[] }) {
         </div>
         <p className="text-sm text-[var(--muted)]">{sentences.length} checked</p>
       </div>
-      <div className="mt-4 space-y-3">
+      <div className="mt-4 max-h-[42rem] min-w-0 space-y-3 overflow-y-auto pr-1">
         {sentences.map((sentence) => (
           <p
             key={sentence.index}
-            className="rounded-lg border border-[var(--line)] border-l-4 bg-[var(--panel-soft)] p-4 text-sm leading-6"
+            className="min-w-0 overflow-hidden rounded-lg border border-[var(--line)] border-l-4 bg-[var(--panel-soft)] p-4 text-sm leading-6"
             style={{ borderColor: sentence.score >= 0.65 ? "var(--rose)" : sentence.score >= 0.45 ? "var(--sun)" : "var(--leaf)" }}
           >
             <span className="mr-2 font-black">{percent(sentence.score)}</span>
-            {sentence.text}
+            <span className="whitespace-pre-wrap break-words">{sentence.text}</span>
           </p>
         ))}
       </div>
@@ -118,7 +118,7 @@ export function ResultDashboard({ result }: { result: AnalysisResponse }) {
   const confidenceDegrees = `${Math.round(result.confidence * 360)}deg`;
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <section className="surface overflow-hidden">
         <div className="grid gap-0 lg:grid-cols-[1fr_260px]">
           <div className="p-5 md:p-6">

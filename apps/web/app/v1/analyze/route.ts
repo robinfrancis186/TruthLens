@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { analyzeImage, analyzeText, analyzeVideo, buildResult } from "../../../lib/server/detectors";
 import { enrichWithHuggingFace } from "../../../lib/server/huggingface";
 import { setCachedResult } from "../../../lib/server/result-cache";
+import { parseTextUpload } from "../../../lib/server/text-parser";
+
+export const runtime = "nodejs";
 
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic"]);
 const videoExtensions = new Set([".mp4", ".mov", ".avi", ".webm"]);
@@ -30,7 +33,11 @@ export async function POST(request: Request) {
     let content = text;
     let sourceName: string | undefined;
     if (file instanceof File) {
-      content = Buffer.from(await file.arrayBuffer()).toString("utf8");
+      try {
+        content = await parseTextUpload(Buffer.from(await file.arrayBuffer()), file.name);
+      } catch (caught) {
+        return error(caught instanceof Error ? caught.message : "Text extraction failed.", 422);
+      }
       sourceName = file.name;
     }
     if (!content.trim()) {
