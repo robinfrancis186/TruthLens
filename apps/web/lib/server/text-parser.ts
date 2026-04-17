@@ -1,24 +1,6 @@
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { pathToFileURL } from "node:url";
 import mammoth from "mammoth";
-import { PDFParse } from "pdf-parse";
 
 const textExtensions = new Set([".txt", ".md"]);
-const pdfWorkerRelativePath = path.join("node_modules", "pdf-parse", "dist", "pdf-parse", "esm", "pdf.worker.mjs");
-
-function configurePdfWorker() {
-  const workerPath = [
-    path.join(/*turbopackIgnore: true*/ process.cwd(), pdfWorkerRelativePath),
-    path.join(/*turbopackIgnore: true*/ process.cwd(), "..", pdfWorkerRelativePath),
-    path.join(/*turbopackIgnore: true*/ process.cwd(), "..", "..", pdfWorkerRelativePath)
-  ]
-    .find((candidate) => existsSync(candidate));
-  if (!workerPath) {
-    throw new Error("PDF text extraction worker is unavailable in this deployment.");
-  }
-  PDFParse.setWorker(pathToFileURL(workerPath).href);
-}
 
 function extensionFor(filename: string) {
   const dotIndex = filename.lastIndexOf(".");
@@ -63,14 +45,9 @@ function assertReadableText(text: string, filename: string) {
 }
 
 async function parsePdf(data: Buffer) {
-  configurePdfWorker();
-  const parser = new PDFParse({ data });
-  try {
-    const result = await parser.getText();
-    return result.text;
-  } finally {
-    await parser.destroy();
-  }
+  const pdfParse = (await import("pdf-parse")).default;
+  const result = await pdfParse(data);
+  return result.text;
 }
 
 export async function parseTextUpload(data: Buffer, filename: string) {
@@ -79,11 +56,15 @@ export async function parseTextUpload(data: Buffer, filename: string) {
 
   if (textExtensions.has(suffix)) {
     parsed = data.toString("utf8");
-  } else if (suffix === ".docx") {
+} else if (suffix === ".docx") {
     const result = await mammoth.extractRawText({ buffer: data });
     parsed = result.value;
   } else if (suffix === ".pdf") {
-    parsed = await parsePdf(data);
+    try {
+      parsed = await parsePdf(data);
+    } catch {
+      throw new Error(`Could not extract readable text from ${filename}. Try a selectable-text PDF, DOCX, TXT, or MD file.`);
+    }
   } else {
     throw new Error("Unsupported text upload type. Use TXT, MD, DOCX, or PDF.");
   }
