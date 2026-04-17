@@ -50,6 +50,7 @@ def test_text_analyze_shape() -> None:
     assert "layer_scores" in body
     assert "watermark_signals" in body
     assert "sentences" in body["artifacts"]
+    assert body["artifacts"]["metadata"]["hf_status"] == "disabled"
 
 
 def test_status_returns_cached_result() -> None:
@@ -70,6 +71,7 @@ def test_image_upload_returns_heatmap() -> None:
     body = response.json()
     assert body["modality"] == "IMAGE"
     assert body["artifacts"]["heatmap"]
+    assert body["artifacts"]["metadata"]["hf_status"] == "disabled"
 
 
 def test_video_upload_returns_timeline() -> None:

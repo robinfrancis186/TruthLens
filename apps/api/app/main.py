@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import time
 import uuid
 from pathlib import Path
@@ -12,6 +13,7 @@ from app.cache import TTLResultCache
 from app.config import get_settings
 from app.detectors import ImageDemoDetector, TextHeuristicDetector, VideoDemoDetector
 from app.fusion import fuse
+from app.huggingface import enrich_with_huggingface
 from app.parsers import parse_text_upload
 
 
@@ -106,6 +108,7 @@ async def analyze(
         if not content.strip():
             raise HTTPException(status_code=422, detail="Text content is empty.")
         output = text_detector.analyze(content, source_name)
+        output = await asyncio.to_thread(enrich_with_huggingface, output, settings, text=content)
     else:
         if file is None:
             raise HTTPException(status_code=422, detail=f"{modality} analysis requires a file upload.")
@@ -116,6 +119,7 @@ async def analyze(
             if suffix not in ImageDemoDetector.allowed_extensions:
                 raise HTTPException(status_code=415, detail="Unsupported image type. Use JPG, PNG, WebP, or HEIC.")
             output = image_detector.analyze(data, filename)
+            output = await asyncio.to_thread(enrich_with_huggingface, output, settings, image=data)
         else:
             if suffix not in VideoDemoDetector.allowed_extensions:
                 raise HTTPException(status_code=415, detail="Unsupported video type. Use MP4, MOV, AVI, or WebM.")

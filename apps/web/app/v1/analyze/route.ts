@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { analyzeImage, analyzeText, analyzeVideo, buildResult } from "../../../lib/server/detectors";
+import { enrichWithHuggingFace } from "../../../lib/server/huggingface";
 import { setCachedResult } from "../../../lib/server/result-cache";
 
 const imageExtensions = new Set([".jpg", ".jpeg", ".png", ".webp", ".heic"]);
@@ -35,7 +36,8 @@ export async function POST(request: Request) {
     if (!content.trim()) {
       return error("Text content is empty.", 422);
     }
-    const result = buildResult(analyzeText(content, sourceName), startedAt);
+    const output = await enrichWithHuggingFace(analyzeText(content, sourceName), { text: content });
+    const result = buildResult(output, startedAt);
     setCachedResult(result);
     return NextResponse.json(result);
   }
@@ -54,7 +56,8 @@ export async function POST(request: Request) {
     if (!imageExtensions.has(suffix)) {
       return error("Unsupported image type. Use JPG, PNG, WebP, or HEIC.", 415);
     }
-    const result = buildResult(analyzeImage(data, file.name), startedAt);
+    const output = await enrichWithHuggingFace(analyzeImage(data, file.name), { image: data });
+    const result = buildResult(output, startedAt);
     setCachedResult(result);
     return NextResponse.json(result);
   }

@@ -3,7 +3,7 @@ import type { AnalysisResponse, HeatmapCell, LayerBreakdown, SentenceArtifact, T
 
 const disclaimer = "TruthLens MVP provides probabilistic demo signals, not legal or forensic proof.";
 
-interface DetectorOutput {
+export interface DetectorOutput {
   modality: AnalysisResponse["modality"];
   layer_scores: Record<string, number>;
   watermark_signals: Record<string, unknown>;

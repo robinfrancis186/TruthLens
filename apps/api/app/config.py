@@ -8,6 +8,10 @@ class Settings(BaseSettings):
     max_upload_mb: int = 200
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
     cors_origin_regex: str | None = r"^http://(localhost|127\.0\.0\.1):[0-9]+$"
+    hf_token: str | None = None
+    hf_text_model: str = "desklib/ai-text-detector-v1.01"
+    hf_image_model: str = "haywoodsloan/ai-image-detector-dev-deploy"
+    hf_inference_endpoint_base: str = "https://api-inference.huggingface.co/models"
 
     model_config = SettingsConfigDict(
         env_file=".env",
