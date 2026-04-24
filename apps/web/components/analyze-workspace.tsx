@@ -14,13 +14,95 @@ const modes: Array<{ id: Modality; label: string; shorthand: string; accept: str
 
 const trustSignals = ["No content stored", "Transparent scoring", "Shareable report"];
 const previewSignals = [
-  { label: "Watermark", copy: "SynthID, C2PA, and provenance slots are wired for future integrations." },
-  { label: "Forensics", copy: "Image heatmaps and video timelines make the demo signals visible." },
-  { label: "Classifier", copy: "Deterministic scoring keeps demos stable while real models are deferred." }
+  { label: "Watermark", copy: "SynthID, C2PA, and provenance checks stay visible as supporting context." },
+  { label: "Forensics", copy: "Image heatmaps and video timelines show where supporting signals concentrate." },
+  { label: "Classifier", copy: "Hugging Face model probability drives the final confidence when configured." }
 ];
 
 const sampleText =
   "Furthermore, it is important to note that transparent verification systems play a crucial role in modern information workflows. Moreover, they provide comprehensive insights with consistent structure and polished transitions.";
+
+type SampledVideoFrame = { file: File; seconds: number };
+
+function waitForMediaEvent(target: HTMLMediaElement, eventName: string) {
+  return new Promise<void>((resolve, reject) => {
+    const cleanup = () => {
+      target.removeEventListener(eventName, onEvent);
+      target.removeEventListener("error", onError);
+    };
+    const onEvent = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("Video could not be decoded."));
+    };
+    target.addEventListener(eventName, onEvent, { once: true });
+    target.addEventListener("error", onError, { once: true });
+  });
+}
+
+function canvasToJpeg(canvas: HTMLCanvasElement, filename: string) {
+  return new Promise<File>((resolve, reject) => {
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error("Could not encode sampled video frame."));
+          return;
+        }
+        resolve(new File([blob], filename, { type: "image/jpeg" }));
+      },
+      "image/jpeg",
+      0.86
+    );
+  });
+}
+
+async function sampleVideoFrames(file: File, sampleCount = 5): Promise<SampledVideoFrame[]> {
+  const url = URL.createObjectURL(file);
+  const video = document.createElement("video");
+  video.preload = "metadata";
+  video.muted = true;
+  video.playsInline = true;
+  video.src = url;
+
+  try {
+    await waitForMediaEvent(video, "loadedmetadata");
+    if (!Number.isFinite(video.duration) || video.duration <= 0 || !video.videoWidth || !video.videoHeight) {
+      throw new Error("Video metadata is not readable.");
+    }
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 768 / Math.max(video.videoWidth, video.videoHeight));
+    canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+    canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("Frame canvas is unavailable.");
+    }
+
+    const upper = Math.max(video.duration - 0.1, 0);
+    const times = Array.from({ length: sampleCount }, (_, index) => {
+      if (sampleCount === 1) return Math.min(upper, video.duration / 2);
+      return Math.min(upper, (video.duration * index) / (sampleCount - 1));
+    });
+
+    const frames: SampledVideoFrame[] = [];
+    for (let index = 0; index < times.length; index += 1) {
+      const seconds = times[index];
+      const eventName = Math.abs(video.currentTime - seconds) > 0.01 ? "seeked" : "loadeddata";
+      video.currentTime = seconds;
+      if (video.readyState < 2 || eventName === "seeked") {
+        await waitForMediaEvent(video, eventName);
+      }
+      context.drawImage(video, 0, 0, canvas.width, canvas.height);
+      frames.push({ file: await canvasToJpeg(canvas, `truthlens-frame-${index + 1}.jpg`), seconds: Math.round(seconds * 100) / 100 });
+    }
+    return frames;
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export function AnalyzeWorkspace() {
   const [mode, setMode] = useState<Modality>("text");
@@ -29,6 +111,7 @@ export function AnalyzeWorkspace() {
   const [result, setResult] = useState<AnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingLabel, setLoadingLabel] = useState("Analyzing...");
 
   const activeMode = useMemo(() => modes.find((entry) => entry.id === mode) ?? modes[0], [mode]);
   const canSubmit = mode === "text" ? Boolean(text.trim() || file) : Boolean(file);
@@ -38,8 +121,11 @@ export function AnalyzeWorkspace() {
     setError(null);
     setResult(null);
     setLoading(true);
+    setLoadingLabel(mode === "video" ? "Sampling frames..." : "Analyzing...");
     try {
-      const response = await analyzeContent({ modality: mode, text: mode === "text" ? text : undefined, file });
+      const videoFrames = mode === "video" && file ? await sampleVideoFrames(file) : undefined;
+      setLoadingLabel("Analyzing...");
+      const response = await analyzeContent({ modality: mode, text: mode === "text" ? text : undefined, file, videoFrames });
       setResult(response);
       window.history.replaceState(null, "", `/results/${response.request_id}`);
     } catch (caught) {
@@ -60,7 +146,7 @@ export function AnalyzeWorkspace() {
           </div>
         </div>
         <div className="hidden rounded-lg border border-[var(--line)] bg-white px-3 py-2 text-xs font-bold text-[var(--muted)] shadow-sm sm:block">
-          Local demo engine
+          Model-backed engine
         </div>
       </nav>
 
@@ -69,7 +155,7 @@ export function AnalyzeWorkspace() {
           <div className="p-6 md:p-8">
             <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--line)] bg-[var(--cyan-soft)] px-3 py-2 text-xs font-black uppercase text-cyanline">
               <span className="h-2 w-2 rounded-full bg-cyanline" />
-              Runnable MVP
+              Model-backed MVP
             </div>
             <h1 className="text-balance mt-4 text-4xl font-black leading-[1.02] md:text-6xl">Check content authenticity in one workspace.</h1>
             <p className="mt-4 max-w-2xl leading-7 text-[var(--muted)]">
@@ -93,8 +179,8 @@ export function AnalyzeWorkspace() {
               src="https://images.unsplash.com/photo-1497366754035-f200968a6e72?auto=format&fit=crop&w=1200&q=80"
             />
             <div className="glass-strip absolute bottom-4 left-4 right-4 rounded-lg p-4">
-              <p className="text-sm font-black">MVP status</p>
-              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">Hybrid heuristics now. Real detector integrations next.</p>
+              <p className="text-sm font-black">Model status</p>
+              <p className="mt-1 text-sm leading-6 text-[var(--muted)]">Classifier confidence first. Supporting signals stay transparent.</p>
             </div>
           </div>
         </div>
@@ -168,7 +254,7 @@ export function AnalyzeWorkspace() {
             disabled={!canSubmit || loading}
             type="submit"
           >
-            {loading ? "Analyzing..." : "Analyze"}
+            {loading ? loadingLabel : "Analyze"}
           </button>
 
           {error ? <p className="mt-4 rounded-lg border-l-4 border-rosemark bg-[var(--paper)] p-3 text-sm text-rosemark">{error}</p> : null}

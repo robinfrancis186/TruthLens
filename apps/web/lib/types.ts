@@ -31,7 +31,7 @@ export interface AnalysisArtifacts {
   heatmap?: HeatmapCell[];
   timeline?: TimelineSegment[];
   metrics?: Record<string, number>;
-  metadata?: Record<string, string | number | boolean | null>;
+  metadata?: Record<string, unknown>;
 }
 
 export interface AnalysisResponse {
@@ -55,4 +55,3 @@ export interface StatusResponse {
   status: "completed";
   result: AnalysisResponse;
 }
-

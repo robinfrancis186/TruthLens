@@ -16,7 +16,8 @@ def test_models() -> None:
     response = client.get("/v1/models")
     assert response.status_code == 200
     body = response.json()
-    assert body["mode"] == "mvp-demo"
+    assert body["mode"] == "model-backed"
+    assert body["hf_configured"] is False
     assert {entry["modality"] for entry in body["modalities"]} == {"IMAGE", "VIDEO", "TEXT"}
 
 
@@ -136,3 +137,19 @@ def test_image_sources_require_ai_provenance_hint() -> None:
     )
     assert response.status_code == 200
     assert response.json()["detected_sources"] == ["No specific generator identified"]
+
+
+def test_image_filename_hint_does_not_change_confidence() -> None:
+    payload = b"\xff\xd8\xff\xdbExif same camera bytes"
+    first = client.post(
+        "/v1/analyze",
+        data={"content_type": "image"},
+        files={"file": ("camera-sample.jpg", payload, "image/jpeg")},
+    ).json()
+    second = client.post(
+        "/v1/analyze",
+        data={"content_type": "image"},
+        files={"file": ("ai-generated-midjourney.jpg", payload, "image/jpeg")},
+    ).json()
+    assert first["confidence"] == second["confidence"]
+    assert first["layer_scores"]["neural_classifier"] == second["layer_scores"]["neural_classifier"]

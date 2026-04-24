@@ -56,7 +56,7 @@ function HeatmapPreview({ cells }: { cells: HeatmapCell[] }) {
           <p className="text-xs font-black uppercase tracking-wide text-cyanline">Image artifact</p>
           <h2 className="mt-1 text-xl font-black">Image Heatmap</h2>
         </div>
-        <p className="text-sm text-[var(--muted)]">Patch-level demo signals</p>
+        <p className="text-sm text-[var(--muted)]">Patch-level support signals</p>
       </div>
       <div className="mt-4 grid aspect-[4/3] grid-cols-8 grid-rows-6 overflow-hidden rounded-lg border border-[var(--line)] bg-[var(--panel-soft)] p-1">
         {cells.map((cell) => (
@@ -116,6 +116,10 @@ export function ResultDashboard({ result }: { result: AnalysisResponse }) {
   const verdict = verdictCopy[result.verdict];
   const resultUrl = typeof window !== "undefined" ? `${window.location.origin}/results/${result.request_id}` : `/results/${result.request_id}`;
   const confidenceDegrees = `${Math.round(result.confidence * 360)}deg`;
+  const metadata = result.artifacts.metadata ?? {};
+  const hfStatus = typeof metadata.hf_status === "string" ? metadata.hf_status : "unknown";
+  const hfModel = typeof metadata.hf_model === "string" ? metadata.hf_model : "not configured";
+  const fusionStrategy = typeof metadata.fusion_strategy === "string" ? metadata.fusion_strategy : "unknown";
 
   return (
     <div className="min-w-0 space-y-5">
@@ -194,6 +198,18 @@ export function ResultDashboard({ result }: { result: AnalysisResponse }) {
             <div className="flex justify-between gap-3">
               <dt className="text-[var(--muted)]">Processing</dt>
               <dd className="font-bold">{result.processing_time_ms}ms</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-[var(--muted)]">Model</dt>
+              <dd className="break-all text-right text-xs font-bold">{hfModel}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-[var(--muted)]">HF status</dt>
+              <dd className="font-bold">{hfStatus}</dd>
+            </div>
+            <div className="flex justify-between gap-3">
+              <dt className="text-[var(--muted)]">Fusion</dt>
+              <dd className="font-bold">{fusionStrategy}</dd>
             </div>
           </dl>
         </div>

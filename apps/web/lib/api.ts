@@ -21,6 +21,7 @@ export async function analyzeContent(input: {
   modality: Modality;
   text?: string;
   file?: File | null;
+  videoFrames?: Array<{ file: File; seconds: number }>;
 }): Promise<AnalysisResponse> {
   const formData = new FormData();
   formData.append("content_type", input.modality);
@@ -28,8 +29,15 @@ export async function analyzeContent(input: {
   if (input.modality === "text" && input.text) {
     formData.append("text", input.text);
   }
-  if (input.file) {
+  if (input.file && !(input.modality === "video" && input.videoFrames?.length)) {
     formData.append("file", input.file);
+  }
+  if (input.modality === "video" && input.file) {
+    formData.append("source_filename", input.file.name);
+  }
+  for (const frame of input.videoFrames ?? []) {
+    formData.append("video_frame", frame.file);
+    formData.append("video_frame_time", String(frame.seconds));
   }
 
   const response = await fetch(`${API_BASE_URL}/v1/analyze`, {

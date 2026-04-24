@@ -66,21 +66,21 @@ class ImageDemoDetector:
         name = filename.lower()
         entropy = byte_entropy(data)
         size_factor = clamp(len(data) / (6 * 1024 * 1024))
-        filename_ai_hint = 1.0 if re.search(r"(midjourney|stable|diffusion|dall|flux|firefly|gemini|generated|ai)", name) else 0.0
+        filename_ai_hint = bool(re.search(r"(midjourney|stable|diffusion|dall|flux|firefly|gemini|generated|ai)", name))
         has_exif = b"Exif" in data[:65536] or b"xmp" in data[:65536].lower()
         has_c2pa = b"c2pa" in data.lower()[:262144] or b"content credentials" in data.lower()[:262144]
         jpeg_blocks = data.count(b"\xff\xd8") + data.count(b"\xff\xdb") + data.count(b"\xff\xc4")
 
-        neural = 0.34 + stable_unit(data, "image-neural") * 0.45 + filename_ai_hint * 0.33
-        frequency = 0.22 + abs(entropy - 0.72) * 0.9 + stable_unit(data, "image-frequency") * 0.18 + filename_ai_hint * 0.08
-        forensic = 0.18 + (0.16 if not has_exif else -0.08) + size_factor * 0.08 + stable_unit(data, "image-forensic") * 0.34 + filename_ai_hint * 0.08
-        provenance = 0.08 + filename_ai_hint * 0.78 + (0.08 if has_c2pa else 0.0)
-        watermark = 0.1 + (0.36 if b"synthid" in data.lower()[:262144] else 0.0) + filename_ai_hint * 0.14
+        neural = 0.5
+        frequency = 0.22 + abs(entropy - 0.72) * 0.9 + stable_unit(data, "image-frequency") * 0.18
+        forensic = 0.18 + (0.16 if not has_exif else -0.08) + size_factor * 0.08 + stable_unit(data, "image-forensic") * 0.34
+        provenance = 0.08 + (0.08 if has_c2pa else 0.0)
+        watermark = 0.1 + (0.36 if b"synthid" in data.lower()[:262144] else 0.0)
 
         layer_scores = {
             "watermark": round_score(watermark),
             "forensic": round_score(forensic),
-            "neural_classifier": round_score(neural),
+            "neural_classifier": round_score(0.5),
             "frequency_domain": round_score(frequency),
             "provenance": round_score(provenance),
         }
@@ -95,24 +95,21 @@ class ImageDemoDetector:
             for x in range(8)
         ]
 
-        if filename_ai_hint or has_c2pa:
+        if has_c2pa:
             detected_sources = likely_sources(
                 ("Midjourney-style image", layer_scores["neural_classifier"]),
                 ("Stable Diffusion / Flux-style image", layer_scores["frequency_domain"]),
-                ("C2PA-attributed AI image", 0.72 if has_c2pa and filename_ai_hint else 0.0),
+                ("C2PA-attributed content", 0.72),
             )
         else:
             detected_sources = ["No specific generator identified"]
 
         explanation_parts = [
-            "Image analysis used deterministic MVP heuristics for metadata, byte distribution, filename hints, and pseudo-neural scoring.",
-            "No real SynthID, C2PA verification, or AIDE model inference is integrated in this build.",
+            "Image scoring uses the model classifier as the primary signal when available.",
+            "Metadata, provenance, and byte-distribution checks are supporting context and do not override model probability.",
         ]
         if not has_exif:
             explanation_parts.append("No EXIF/XMP camera metadata was found in the inspected byte range, which is treated as weak synthetic-media evidence.")
-        if filename_ai_hint:
-            explanation_parts.append("The filename contains AI-generator wording, which increases provenance suspicion in this demo mode.")
-
         return DetectorOutput(
             modality="IMAGE",
             layer_scores=layer_scores,
@@ -123,14 +120,20 @@ class ImageDemoDetector:
             layer_breakdown=[
                 {"name": "Watermark", "score": layer_scores["watermark"], "explanation": "Demo scan for watermark-like byte markers only."},
                 {"name": "Forensic", "score": layer_scores["forensic"], "explanation": "Metadata presence, size, and byte-distribution heuristics."},
-                {"name": "Neural Classifier", "score": layer_scores["neural_classifier"], "explanation": "Deterministic pseudo-neural score for UI/API validation."},
+                {"name": "Neural Classifier", "score": layer_scores["neural_classifier"], "explanation": "Awaiting Hugging Face image classifier inference."},
                 {"name": "Frequency Domain", "score": layer_scores["frequency_domain"], "explanation": "Entropy-derived stand-in for FFT/DCT anomaly scoring."},
                 {"name": "Provenance", "score": layer_scores["provenance"], "explanation": "Filename and demo C2PA marker checks."},
             ],
             detected_sources=detected_sources,
             artifacts={
                 "heatmap": heatmap,
-                "metadata": {"has_exif_or_xmp": has_exif, "jpeg_marker_count": jpeg_blocks, "byte_entropy": round(entropy, 3)},
+                "metadata": {
+                    "source_filename": filename,
+                    "filename_ai_hint": filename_ai_hint,
+                    "has_exif_or_xmp": has_exif,
+                    "jpeg_marker_count": jpeg_blocks,
+                    "byte_entropy": round(entropy, 3),
+                },
             },
             explanation_parts=explanation_parts,
         )
@@ -242,7 +245,7 @@ class TextHeuristicDetector:
         neural = 0.26 + stable_unit(normalized, "text-neural") * 0.12 + linguistic * 0.58 + phrase_signal * 0.08
         if phrase_hits == 0:
             neural -= human_context_signal * 0.14
-        provenance = 0.08 + (0.12 if filename and Path(filename).suffix.lower() in {".docx", ".pdf"} else 0.0)
+        provenance = 0.08
         watermark = 0.08 + (0.32 if "synthid" in normalized.lower() else 0.0)
 
         layer_scores = {
@@ -266,8 +269,8 @@ class TextHeuristicDetector:
         )
 
         explanation_parts = [
-            "Text analysis used deterministic MVP heuristics for sentence rhythm, burstiness, lexical variety, phrase signatures, and pseudo-neural scoring.",
-            "Real SynthID text detection and transformer classifiers are not integrated in this build.",
+            "Text scoring uses the model classifier as the primary signal when available.",
+            "Linguistic markers are supporting context and do not override model probability.",
         ]
         if phrase_hits:
             explanation_parts.append("Repeated assistant-style transition phrases increased the AI-likelihood score.")
@@ -283,8 +286,8 @@ class TextHeuristicDetector:
             layer_breakdown=[
                 {"name": "Watermark", "score": layer_scores["watermark"], "explanation": "Demo marker scan for SynthID-like wording only."},
                 {"name": "Linguistic", "score": layer_scores["linguistic"], "explanation": "Burstiness, sentence rhythm, lexical variety, and phrase-density heuristics."},
-                {"name": "Neural Classifier", "score": layer_scores["neural_classifier"], "explanation": "Deterministic pseudo-neural score for API and UI validation."},
-                {"name": "Provenance", "score": layer_scores["provenance"], "explanation": "Document-source context only; no text provenance standard is verified."},
+                {"name": "Neural Classifier", "score": layer_scores["neural_classifier"], "explanation": "Awaiting Hugging Face text classifier inference."},
+                {"name": "Provenance", "score": layer_scores["provenance"], "explanation": "Document-source context; filename and file type are not used for scoring."},
             ],
             detected_sources=detected_sources,
             artifacts={
@@ -298,6 +301,7 @@ class TextHeuristicDetector:
                     "punctuation_uniformity": round(punctuation_uniformity, 3),
                     "human_context": round(human_context_signal, 3),
                 },
+                "metadata": {"source_filename": filename},
             },
             explanation_parts=explanation_parts,
         )

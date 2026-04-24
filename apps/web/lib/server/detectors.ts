@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { AnalysisResponse, HeatmapCell, LayerBreakdown, SentenceArtifact, TimelineSegment } from "../types";
 
-const disclaimer = "TruthLens MVP provides probabilistic demo signals, not legal or forensic proof.";
+const disclaimer = "TruthLens provides probabilistic AI-content signals, not legal or forensic proof.";
+
+export const calibrationVersion = "hf-model-primary-v1";
 
 export interface DetectorOutput {
   modality: AnalysisResponse["modality"];
@@ -13,28 +15,11 @@ export interface DetectorOutput {
   explanation_parts: string[];
 }
 
-const weights: Record<AnalysisResponse["modality"], Record<string, number>> = {
-  IMAGE: {
-    watermark: 0.18,
-    forensic: 0.2,
-    neural_classifier: 0.28,
-    frequency_domain: 0.22,
-    provenance: 0.12
-  },
-  VIDEO: {
-    watermark: 0.14,
-    temporal_forensics: 0.28,
-    face_mesh: 0.18,
-    neural_classifier: 0.26,
-    provenance: 0.14
-  },
-  TEXT: {
-    watermark: 0.06,
-    linguistic: 0.45,
-    neural_classifier: 0.42,
-    provenance: 0.07
-  }
-};
+export interface VideoFrameInput {
+  data: Buffer;
+  index: number;
+  seconds: number;
+}
 
 const aiPhrases = [
   "in conclusion",
@@ -50,11 +35,11 @@ const aiPhrases = [
   "as an ai"
 ];
 
-function clamp(value: number, low = 0, high = 1) {
+export function clamp(value: number, low = 0, high = 1) {
   return Math.max(low, Math.min(high, value));
 }
 
-function roundScore(value: number) {
+export function roundScore(value: number) {
   return Math.round(clamp(value) * 1000) / 1000;
 }
 
@@ -98,24 +83,42 @@ function sentenceWordCount(sentence: string) {
   return (sentence.match(/[A-Za-z][A-Za-z'-]*/g) ?? []).length;
 }
 
-function confidenceRange(score: number, layerScores: Record<string, number>): [number, number] {
-  const values = Object.values(layerScores);
-  const spread = Math.max(...values) - Math.min(...values);
-  const width = clamp(0.06 + spread * 0.12, 0.06, 0.16);
+function metadataFor(output: DetectorOutput) {
+  output.artifacts.metadata ??= {};
+  return output.artifacts.metadata;
+}
+
+function modelScoreFromMetadata(output: DetectorOutput) {
+  const metadata = output.artifacts.metadata;
+  return metadata?.hf_status === "ok" && typeof metadata.hf_score === "number" ? metadata.hf_score : null;
+}
+
+function confidenceRange(score: number, output: DetectorOutput): [number, number] {
+  const values = Object.values(output.layer_scores);
+  const spread = values.length ? Math.max(...values) - Math.min(...values) : 0;
+  const modelPrimary = modelScoreFromMetadata(output) !== null;
+  const width = modelPrimary ? clamp(0.04 + spread * 0.08, 0.04, 0.12) : clamp(0.08 + spread * 0.14, 0.08, 0.18);
   return [roundScore(score - width), roundScore(score + width)];
 }
 
+function weightedFallbackScore(output: DetectorOutput) {
+  const values = Object.values(output.layer_scores);
+  if (!values.length) return 0.5;
+  return roundScore(values.reduce((total, value) => total + value, 0) / values.length);
+}
+
 function fuse(output: DetectorOutput, processingTimeMs: number): AnalysisResponse {
-  const outputWeights = weights[output.modality];
-  const totalWeight = Object.values(outputWeights).reduce((total, weight) => total + weight, 0);
-  const confidence = roundScore(
-    Object.entries(outputWeights).reduce((total, [name, weight]) => total + (output.layer_scores[name] ?? 0) * weight, 0) / totalWeight
-  );
+  const metadata = metadataFor(output);
+  const modelScore = modelScoreFromMetadata(output);
+  const confidence = modelScore ?? weightedFallbackScore(output);
+  metadata.fusion_strategy = modelScore === null ? "heuristic_fallback" : "model_primary";
+  metadata.calibration_version = calibrationVersion;
+
   return {
     request_id: randomUUID(),
     verdict: verdictFor(confidence),
     confidence,
-    confidence_range: confidenceRange(confidence, output.layer_scores),
+    confidence_range: confidenceRange(confidence, output),
     modality: output.modality,
     detected_sources: output.detected_sources,
     watermark_signals: output.watermark_signals,
@@ -129,21 +132,20 @@ function fuse(output: DetectorOutput, processingTimeMs: number): AnalysisRespons
 }
 
 export function analyzeImage(data: Buffer, filename: string): DetectorOutput {
-  const name = filename.toLowerCase();
   const lower = data.subarray(0, 262144).toString("latin1").toLowerCase();
   const entropy = byteEntropy(data);
   const sizeFactor = clamp(data.length / (6 * 1024 * 1024));
-  const filenameAiHint = /(midjourney|stable|diffusion|dall|flux|firefly|gemini|generated|ai)/.test(name) ? 1 : 0;
+  const filenameAiHint = /(midjourney|stable|diffusion|dall|flux|firefly|gemini|generated|ai)/i.test(filename);
   const hasExif = data.subarray(0, 65536).includes("Exif") || lower.includes("xmp");
   const hasC2pa = lower.includes("c2pa") || lower.includes("content credentials");
   const jpegMarkerCount = (data.toString("latin1").match(/\xff\xd8|\xff\xdb|\xff\xc4/g) ?? []).length;
 
   const layerScores = {
-    watermark: roundScore(0.1 + (lower.includes("synthid") ? 0.36 : 0) + filenameAiHint * 0.14),
-    forensic: roundScore(0.18 + (hasExif ? -0.08 : 0.16) + sizeFactor * 0.08 + stableUnit(data, "image-forensic") * 0.34 + filenameAiHint * 0.08),
-    neural_classifier: roundScore(0.34 + stableUnit(data, "image-neural") * 0.45 + filenameAiHint * 0.33),
-    frequency_domain: roundScore(0.22 + Math.abs(entropy - 0.72) * 0.9 + stableUnit(data, "image-frequency") * 0.18 + filenameAiHint * 0.08),
-    provenance: roundScore(0.08 + filenameAiHint * 0.78 + (hasC2pa ? 0.08 : 0))
+    watermark: roundScore(0.1 + (lower.includes("synthid") ? 0.36 : 0)),
+    forensic: roundScore(0.18 + (hasExif ? -0.08 : 0.16) + sizeFactor * 0.08 + stableUnit(data, "image-forensic") * 0.34),
+    neural_classifier: roundScore(0.5),
+    frequency_domain: roundScore(0.22 + Math.abs(entropy - 0.72) * 0.9 + stableUnit(data, "image-frequency") * 0.18),
+    provenance: roundScore(0.08 + (hasC2pa ? 0.08 : 0))
   };
   const heatmap: HeatmapCell[] = Array.from({ length: 48 }, (_, index) => ({
     x: index % 8,
@@ -155,33 +157,30 @@ export function analyzeImage(data: Buffer, filename: string): DetectorOutput {
     modality: "IMAGE",
     layer_scores: layerScores,
     watermark_signals: {
-      synthid: { detected: false, score: layerScores.watermark, status: "demo_not_integrated" },
-      c2pa: { present: hasC2pa, valid: null, status: "demo_metadata_scan" }
+      synthid: { detected: false, score: layerScores.watermark, status: "marker_scan_only" },
+      c2pa: { present: hasC2pa, valid: null, status: "metadata_scan_only" }
     },
     layer_breakdown: [
-      { name: "Watermark", score: layerScores.watermark, explanation: "Demo scan for watermark-like byte markers only." },
-      { name: "Forensic", score: layerScores.forensic, explanation: "Metadata presence, size, and byte-distribution heuristics." },
-      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Deterministic pseudo-neural score for UI/API validation." },
-      { name: "Frequency Domain", score: layerScores.frequency_domain, explanation: "Entropy-derived stand-in for FFT/DCT anomaly scoring." },
-      { name: "Provenance", score: layerScores.provenance, explanation: "Filename and demo C2PA marker checks." }
+      { name: "Watermark", score: layerScores.watermark, explanation: "Marker scan for visible SynthID-like strings." },
+      { name: "Forensic", score: layerScores.forensic, explanation: "Supporting metadata and byte-distribution checks only." },
+      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Awaiting Hugging Face image classifier inference." },
+      { name: "Frequency Domain", score: layerScores.frequency_domain, explanation: "Supporting entropy anomaly signal only." },
+      { name: "Provenance", score: layerScores.provenance, explanation: "C2PA marker context; filename hints are not used for scoring." }
     ],
-    detected_sources:
-      filenameAiHint || hasC2pa
-        ? likelySources([
-            ["Midjourney-style image", layerScores.neural_classifier],
-            ["Stable Diffusion / Flux-style image", layerScores.frequency_domain],
-            ["C2PA-attributed AI image", hasC2pa && filenameAiHint ? 0.72 : 0]
-          ])
-        : ["No specific generator identified"],
+    detected_sources: hasC2pa ? ["C2PA-attributed content"] : ["No specific generator identified"],
     artifacts: {
       heatmap,
-      metadata: { has_exif_or_xmp: hasExif, jpeg_marker_count: jpegMarkerCount, byte_entropy: Math.round(entropy * 1000) / 1000 }
+      metadata: {
+        source_filename: filename,
+        filename_ai_hint: filenameAiHint,
+        has_exif_or_xmp: hasExif,
+        jpeg_marker_count: jpegMarkerCount,
+        byte_entropy: Math.round(entropy * 1000) / 1000
+      }
     },
     explanation_parts: [
-      "Image analysis used deterministic MVP heuristics for metadata, byte distribution, filename hints, and pseudo-neural scoring.",
-      "No real SynthID, C2PA verification, or AIDE model inference is integrated in this build.",
-      ...(hasExif ? [] : ["No EXIF/XMP camera metadata was found in the inspected byte range, which is treated as weak synthetic-media evidence."]),
-      ...(filenameAiHint ? ["The filename contains AI-generator wording, which increases provenance suspicion in this demo mode."] : [])
+      "Image scoring uses the model classifier as the primary signal when available.",
+      "Metadata, provenance, and byte-distribution checks are supporting context and do not override model probability."
     ]
   };
 }
@@ -206,14 +205,12 @@ export function analyzeText(text: string, filename?: string): DetectorOutput {
 
   let linguistic = 0.2 + lowBurstinessSignal * 0.22 + polishedLengthSignal * 0.18 + phraseSignal * 0.42;
   if (phraseHits === 0) linguistic -= humanContextSignal * 0.2;
-  let neural = 0.26 + stableUnit(normalized, "text-neural") * 0.12 + linguistic * 0.58 + phraseSignal * 0.08;
-  if (phraseHits === 0) neural -= humanContextSignal * 0.14;
 
   const layerScores = {
     watermark: roundScore(0.08 + (lower.includes("synthid") ? 0.32 : 0)),
     linguistic: roundScore(linguistic),
-    neural_classifier: roundScore(neural),
-    provenance: roundScore(0.08 + (filename && /\.(docx|pdf)$/i.test(filename) ? 0.12 : 0))
+    neural_classifier: roundScore(0.5),
+    provenance: roundScore(0.08)
   };
   const sentenceArtifacts: SentenceArtifact[] = sentences.slice(0, 80).map((sentence, index) => {
     const length = Math.max(sentenceWordCount(sentence), 1);
@@ -224,12 +221,12 @@ export function analyzeText(text: string, filename?: string): DetectorOutput {
   return {
     modality: "TEXT",
     layer_scores: layerScores,
-    watermark_signals: { synthid_text: { detected: lower.includes("synthid"), score: layerScores.watermark, status: "demo_marker_scan" } },
+    watermark_signals: { synthid_text: { detected: lower.includes("synthid"), score: layerScores.watermark, status: "marker_scan_only" } },
     layer_breakdown: [
-      { name: "Watermark", score: layerScores.watermark, explanation: "Demo marker scan for SynthID-like wording only." },
-      { name: "Linguistic", score: layerScores.linguistic, explanation: "Burstiness, sentence rhythm, lexical variety, and phrase-density heuristics." },
-      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Deterministic pseudo-neural score for API and UI validation." },
-      { name: "Provenance", score: layerScores.provenance, explanation: "Document-source context only; no text provenance standard is verified." }
+      { name: "Watermark", score: layerScores.watermark, explanation: "Marker scan for SynthID-like wording." },
+      { name: "Linguistic", score: layerScores.linguistic, explanation: "Supporting rhythm, lexical variety, and phrase-density signal." },
+      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Awaiting Hugging Face text classifier inference." },
+      { name: "Provenance", score: layerScores.provenance, explanation: "Document-source context; filename and file type are not used for scoring." }
     ],
     detected_sources: likelySources([
       ["General LLM-style prose", layerScores.linguistic],
@@ -245,60 +242,112 @@ export function analyzeText(text: string, filename?: string): DetectorOutput {
         burstiness: Math.round(burstiness * 1000) / 1000,
         phrase_hits: phraseHits,
         human_context: Math.round(humanContextSignal * 1000) / 1000
+      },
+      metadata: {
+        source_filename: filename ?? null
       }
     },
     explanation_parts: [
-      "Text analysis used deterministic MVP heuristics for sentence rhythm, burstiness, lexical variety, phrase signatures, and pseudo-neural scoring.",
-      "Real SynthID text detection and transformer classifiers are not integrated in this build.",
-      ...(phraseHits ? ["Repeated assistant-style transition phrases increased the AI-likelihood score."] : []),
-      ...(lowBurstinessSignal > 0.65 ? ["Sentence lengths are unusually uniform, a weak signal often associated with model-generated text."] : [])
+      "Text scoring uses the model classifier as the primary signal when available.",
+      "Linguistic markers are supporting context and do not override model probability.",
+      ...(phraseHits ? ["Assistant-style transition phrases were found as a supporting signal."] : []),
+      ...(lowBurstinessSignal > 0.65 ? ["Sentence lengths are unusually uniform, a weak supporting signal often associated with model-generated text."] : [])
     ]
   };
 }
 
 export function analyzeVideo(data: Buffer, filename: string): DetectorOutput {
-  const name = filename.toLowerCase();
   const lower = data.subarray(0, 262144).toString("latin1").toLowerCase();
   const entropy = byteEntropy(data);
   const sizeMb = data.length / (1024 * 1024);
-  const filenameAiHint = /(sora|veo|runway|kling|deepfake|generated|ai)/.test(name) ? 1 : 0;
   const hasMp4Metadata = ["moov", "mvhd", "udta"].some((marker) => lower.includes(marker));
+  const filenameAiHint = /(sora|veo|runway|kling|deepfake|generated|ai)/i.test(filename);
   const layerScores = {
     watermark: roundScore(0.08 + (lower.includes("synthid") || lower.includes("videoseal") ? 0.34 : 0)),
-    temporal_forensics: roundScore(0.26 + stableUnit(data, "video-temporal") * 0.45 + filenameAiHint * 0.18),
-    face_mesh: roundScore(0.24 + stableUnit(data, "video-face") * 0.42 + filenameAiHint * 0.14),
-    neural_classifier: roundScore(0.3 + stableUnit(data, "video-neural") * 0.42 + clamp(sizeMb / 200) * 0.06),
-    provenance: roundScore(0.1 + filenameAiHint * 0.45 + (hasMp4Metadata ? 0 : 0.07))
+    temporal_forensics: roundScore(0.3),
+    face_mesh: roundScore(0.3),
+    neural_classifier: roundScore(0.5),
+    provenance: roundScore(0.1 + (hasMp4Metadata ? 0 : 0.07))
   };
-  const timeline: TimelineSegment[] = Array.from({ length: 8 }, (_, index) => ({
-    start_seconds: index * 5,
-    end_seconds: index * 5 + 5,
-    score: roundScore(0.2 + stableUnit(data, `video-segment-${index}`) * 0.68)
-  }));
   return {
     modality: "VIDEO",
     layer_scores: layerScores,
     watermark_signals: {
-      synthid_video: { detected: false, score: layerScores.watermark, status: "demo_not_integrated" },
-      video_seal: { detected: false, score: layerScores.watermark, status: "demo_not_integrated" },
-      c2pa: { present: false, valid: null, status: "demo_not_integrated" }
+      synthid_video: { detected: false, score: layerScores.watermark, status: "marker_scan_only" },
+      video_seal: { detected: false, score: layerScores.watermark, status: "marker_scan_only" },
+      c2pa: { present: false, valid: null, status: "not_verified" }
     },
     layer_breakdown: [
-      { name: "Watermark", score: layerScores.watermark, explanation: "Demo marker scan for SynthID/VideoSeal-like strings." },
-      { name: "Temporal Forensics", score: layerScores.temporal_forensics, explanation: "Deterministic stand-in for optical-flow and coherence analysis." },
-      { name: "Face Mesh", score: layerScores.face_mesh, explanation: "Pseudo-score for face geometry and lip-sync inconsistency checks." },
-      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Deterministic pseudo-neural score for video generator coverage." },
-      { name: "Provenance", score: layerScores.provenance, explanation: "Container marker and filename provenance heuristics." }
+      { name: "Watermark", score: layerScores.watermark, explanation: "Marker scan for SynthID/VideoSeal-like strings." },
+      { name: "Temporal Forensics", score: layerScores.temporal_forensics, explanation: "Frame-level model scoring is required for the deployed video path." },
+      { name: "Face Mesh", score: layerScores.face_mesh, explanation: "Face-level deepfake analysis is not run in the Vercel frame-sampling path." },
+      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Awaiting Hugging Face frame classifier inference." },
+      { name: "Provenance", score: layerScores.provenance, explanation: "Container context only; filename hints are not used for scoring." }
     ],
-    detected_sources: likelySources([
-      ["Runway/Kling-style generated video", layerScores.temporal_forensics],
-      ["Sora/Veo-style generated video", layerScores.neural_classifier],
-      ["Face-swap/deepfake-style edit", layerScores.face_mesh]
-    ]),
-    artifacts: { timeline, metadata: { size_mb: Math.round(sizeMb * 100) / 100, byte_entropy: Math.round(entropy * 1000) / 1000, has_mp4_metadata: hasMp4Metadata } },
+    detected_sources: ["No specific generator identified"],
+    artifacts: {
+      timeline: [],
+      metadata: {
+        source_filename: filename,
+        filename_ai_hint: filenameAiHint,
+        size_mb: Math.round(sizeMb * 100) / 100,
+        byte_entropy: Math.round(entropy * 1000) / 1000,
+        has_mp4_metadata: hasMp4Metadata
+      }
+    },
     explanation_parts: [
-      "Video analysis used deterministic MVP heuristics for byte patterns, container markers, filename hints, and timeline scoring.",
-      "Real frame extraction, MediaPipe face mesh, optical flow, VideoSeal, and deepfake model inference are deferred."
+      "Video scoring uses sampled frame classifier results as the primary signal when available.",
+      "Raw video container bytes are treated as supporting metadata only."
+    ]
+  };
+}
+
+export function analyzeVideoFrames(frames: VideoFrameInput[], filename?: string): DetectorOutput {
+  const frameEntropies = frames.map((frame) => byteEntropy(frame.data));
+  const averageEntropy = frameEntropies.length ? frameEntropies.reduce((total, value) => total + value, 0) / frameEntropies.length : 0;
+  const joinedSeed = Buffer.concat(frames.map((frame) => frame.data.subarray(0, 4096)));
+  const filenameAiHint = filename ? /(sora|veo|runway|kling|deepfake|generated|ai)/i.test(filename) : false;
+  const layerScores = {
+    watermark: roundScore(0.08),
+    temporal_forensics: roundScore(0.22 + Math.abs(averageEntropy - 0.72) * 0.45),
+    face_mesh: roundScore(0.25 + stableUnit(joinedSeed, "video-face-support") * 0.16),
+    neural_classifier: roundScore(0.5),
+    provenance: roundScore(0.1)
+  };
+  const timeline: TimelineSegment[] = frames.map((frame, index) => ({
+    start_seconds: frame.seconds,
+    end_seconds: frames[index + 1]?.seconds ?? frame.seconds + 1,
+    score: layerScores.neural_classifier
+  }));
+
+  return {
+    modality: "VIDEO",
+    layer_scores: layerScores,
+    watermark_signals: {
+      synthid_video: { detected: false, score: layerScores.watermark, status: "frame_marker_scan_only" },
+      video_seal: { detected: false, score: layerScores.watermark, status: "frame_marker_scan_only" },
+      c2pa: { present: false, valid: null, status: "not_verified" }
+    },
+    layer_breakdown: [
+      { name: "Watermark", score: layerScores.watermark, explanation: "Frame marker scan for watermark-like strings." },
+      { name: "Temporal Forensics", score: layerScores.temporal_forensics, explanation: "Supporting frame entropy consistency signal." },
+      { name: "Face Mesh", score: layerScores.face_mesh, explanation: "Supporting frame-level face/deepfake placeholder signal." },
+      { name: "Neural Classifier", score: layerScores.neural_classifier, explanation: "Awaiting Hugging Face frame classifier inference." },
+      { name: "Provenance", score: layerScores.provenance, explanation: "Container and filename context only; not used for scoring." }
+    ],
+    detected_sources: ["No specific generator identified"],
+    artifacts: {
+      timeline,
+      metadata: {
+        source_filename: filename ?? null,
+        filename_ai_hint: filenameAiHint,
+        sampled_frame_count: frames.length,
+        average_frame_entropy: Math.round(averageEntropy * 1000) / 1000
+      }
+    },
+    explanation_parts: [
+      "Video scoring uses browser-sampled frames and the image AI detector as the primary deployed signal.",
+      "Full temporal deepfake modeling is not run in this Vercel build."
     ]
   };
 }

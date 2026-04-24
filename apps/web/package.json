@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "lint": "eslint . --max-warnings=0",
-    "smoke": "node scripts/smoke-ui.mjs"
+    "smoke": "node scripts/smoke-ui.mjs",
+    "test": "node --import tsx --test tests/*.test.ts"
   },
   "dependencies": {
     "mammoth": "^1.12.0",
@@ -26,6 +27,7 @@
     "playwright-core": "^1.57.0",
     "postcss": "8.4.49",
     "tailwindcss": "3.4.17",
+    "tsx": "^4.21.0",
     "typescript": "5.7.3"
   }
 }

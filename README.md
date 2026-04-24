@@ -1,8 +1,8 @@
 # TruthLens
 
-TruthLens is a runnable MVP for a privacy-first AI-generated content detection platform. This version implements the full product shell from the PRD with transparent demo/heuristic detectors for images, videos, and text.
+TruthLens is a runnable MVP for a privacy-first AI-generated content detection platform. This version implements the full product shell from the PRD with model-backed text, image, and sampled-frame video detection through Hugging Face Inference Providers.
 
-The MVP is useful for product testing, API integration, UI validation, and future model integration work. It does not provide production-grade forensic certainty yet. All watermark, neural, forensic, and deepfake signals are deterministic demo signals until real detector weights and licensed model integrations are added.
+The MVP is useful for product testing, API integration, UI validation, and future model integration work. It does not provide legal or forensic certainty. Hugging Face classifier probability is the primary scoring signal when configured; watermark, provenance, and heuristic signals are supporting context.
 
 ## What Is Included
 
@@ -40,11 +40,25 @@ If the API runs somewhere else, create `apps/web/.env.local`:
 NEXT_PUBLIC_API_BASE_URL=http://localhost:8000
 ```
 
+For the bundled Next.js `/v1` API routes, configure Hugging Face inference:
+
+```bash
+HF_TOKEN=hf_...
+HF_TEXT_MODEL=desklib/ai-text-detector-v1.01
+HF_TEXT_FALLBACK_MODELS=Oxidane/tmr-ai-text-detector
+HF_IMAGE_MODEL=haywoodsloan/ai-image-detector-dev-deploy
+HF_IMAGE_FALLBACK_MODELS=Ateeqq/ai-vs-human-image-detector,umm-maybe/AI-image-detector
+HF_VIDEO_FRAME_MODEL=haywoodsloan/ai-image-detector-dev-deploy
+```
+
+Production Vercel deployments fail closed when `HF_TOKEN` is missing instead of returning misleading demo confidence.
+
 ## Test Commands
 
 ```bash
 npm run lint:web
 npm run build:web
+npm run test:web
 cd apps/api && python3 -m pytest
 ```
 
@@ -56,7 +70,7 @@ cd apps/api && python3 -m pytest
 
 ## MVP Limitations
 
-- Detection scores are hybrid demo heuristics, not production ML verdicts.
-- Real SynthID, C2PA, VideoSeal, AIDE, FaceForensics++, and transformer model integrations are deferred.
+- Detection scores are probabilistic ML verdicts when Hugging Face is configured; they are not forensic proof.
+- Real SynthID, C2PA validation, VideoSeal, AIDE, and FaceForensics++ integrations are deferred.
+- Video detection in the Vercel runtime uses browser-sampled frames and image-detector inference, not full temporal video-model inference.
 - Redis/BullMQ, API keys, browser extension, Kubernetes, and production rate limits are out of scope for this first runnable build.
-

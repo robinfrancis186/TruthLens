@@ -60,23 +60,30 @@ def health() -> dict[str, str]:
 @app.get("/v1/models")
 def models() -> dict[str, object]:
     return {
-        "mode": "mvp-demo",
-        "disclaimer": "Coverage entries describe planned production integrations; current scoring is deterministic demo/heuristic logic.",
+        "mode": "model-backed",
+        "hf_configured": bool(settings.hf_token),
+        "disclaimer": "Scores are probabilistic model outputs with supporting metadata signals, not legal or forensic proof.",
         "modalities": [
             {
                 "modality": "IMAGE",
                 "accepted_types": sorted(ImageDemoDetector.allowed_extensions),
-                "planned_integrations": ["SynthID", "C2PA", "AIDE", "CLIP probe", "FFT/DCT forensics"],
+                "primary_model": settings.hf_image_model_list[0],
+                "fallback_models": settings.hf_image_model_list[1:],
+                "supporting_signals": ["EXIF/XMP context", "C2PA marker scan", "byte entropy"],
             },
             {
                 "modality": "VIDEO",
                 "accepted_types": sorted(VideoDemoDetector.allowed_extensions),
-                "planned_integrations": ["SynthID Video", "VideoSeal", "MediaPipe", "FFmpeg", "FaceForensics++"],
+                "primary_model": settings.hf_video_frame_model,
+                "fallback_models": settings.hf_image_model_list[1:],
+                "supporting_signals": ["frame-level image classifier timeline"],
             },
             {
                 "modality": "TEXT",
                 "accepted_types": sorted(TextHeuristicDetector.allowed_extensions),
-                "planned_integrations": ["SynthID Text", "RADAR", "Binoculars", "DeBERTa", "multilingual DistilBERT"],
+                "primary_model": settings.hf_text_model_list[0],
+                "fallback_models": settings.hf_text_model_list[1:],
+                "supporting_signals": ["sentence rhythm", "lexical diversity", "phrase density"],
             },
         ],
     }

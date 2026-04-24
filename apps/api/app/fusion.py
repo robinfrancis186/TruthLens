@@ -48,11 +48,27 @@ def confidence_range(score: float, layer_scores: dict[str, float]) -> list[float
     return [round_score(score - width), round_score(score + width)]
 
 
+def model_score(output: DetectorOutput) -> float | None:
+    metadata = output.artifacts.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("hf_status") == "ok" and isinstance(metadata.get("hf_score"), (int, float)):
+        return round_score(float(metadata["hf_score"]))
+    return None
+
+
 def fuse(output: DetectorOutput, request_id: str, processing_time_ms: int) -> dict[str, Any]:
-    weights = WEIGHTS[output.modality]
-    total_weight = sum(weights.values())
-    score = sum(output.layer_scores.get(name, 0.0) * weight for name, weight in weights.items()) / total_weight
-    score = round_score(score)
+    score = model_score(output)
+    if score is None:
+        weights = WEIGHTS[output.modality]
+        total_weight = sum(weights.values())
+        score = sum(output.layer_scores.get(name, 0.0) * weight for name, weight in weights.items()) / total_weight
+        score = round_score(score)
+        fusion_strategy = "heuristic_fallback"
+    else:
+        fusion_strategy = "model_primary"
+    metadata = output.artifacts.get("metadata")
+    if isinstance(metadata, dict):
+        metadata["fusion_strategy"] = fusion_strategy
+        metadata["calibration_version"] = "hf-model-primary-v1"
     explanation = " ".join(output.explanation_parts)
     return {
         "request_id": request_id,
